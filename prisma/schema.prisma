@@ -14,6 +14,7 @@ model User {
   id        Int       @id @default(autoincrement())
   email     String    @unique
   password  String
+  role      String    @default("USER") // USER, ADMIN
   isPro     Boolean   @default(false)
   payments  Payment[]
   createdAt DateTime  @default(now())
@@ -39,4 +40,17 @@ model Payment {
   updatedAt             DateTime @updatedAt
 
   @@map("payments")
+}
+
+model ContactMessage {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String?
+  message   String   @db.Text
+  status    String   @default("UNREAD") // UNREAD, READ, REPLIED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("contact_messages")
 }
