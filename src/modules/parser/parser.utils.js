@@ -72,7 +72,19 @@ function parseResumeText(text) {
 
   // Normalize newlines and clean up carriage returns
   const cleanText = text.replace(/\r/g, '');
-  const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  const rawLines = cleanText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+  // Filter out page numbering artifacts (e.g. "-- 1 of 2 --", "Page 1 of 2", "- 1 -")
+  const isPageArtifact = (l) => {
+    const s = l.trim();
+    return (
+      /^[-–—\s*#_]*page\s*\d+(\s*(?:of|\/)\s*\d+)?[-–—\s*#_]*$/i.test(s) ||
+      /^[-–—\s*#_]*\d+\s*(?:of|\/)\s*\d+[-–—\s*#_]*$/i.test(s) ||
+      /^[-–—\s*#_]*\d+[-–—\s*#_]*$/.test(s) ||
+      /^[-–—=_]{2,}$/.test(s)
+    );
+  };
+  const lines = rawLines.filter(l => !isPageArtifact(l));
 
   // Define section heading patterns
   const SECTIONS = {
@@ -164,26 +176,24 @@ function parseResumeText(text) {
     }
   }
 
-  // Full Name: Usually the first non-empty line of the resume that doesn't contain contact details
+  // Full Name: Look for a clean personal name in the header lines
   let fullName = '';
-  for (let i = 0; i < Math.min(headerLines.length, 5); i++) {
-    const line = headerLines[i];
+  for (let i = 0; i < Math.min(headerLines.length, 8); i++) {
+    const candidate = headerLines[i].replace(/^[-–—•*\s]+|[-–—•*\s]+$/g, '').trim();
     if (
-      line.length > 2 &&
-      line.length < 35 &&
-      !line.includes('@') &&
-      !/github\.com|linkedin\.com/i.test(line) &&
-      !/resume|cv|curriculum|vitae/i.test(line) &&
-      !/^\+?\d/ .test(line) && // doesn't start with a number
-      line.split(/\s+/).length >= 2 // has at least 2 words
+      candidate.length >= 2 &&
+      candidate.length < 40 &&
+      !candidate.includes('@') &&
+      !/\d/.test(candidate) && // Real person names do not contain digits
+      !/github\.com|linkedin\.com|http|www\./i.test(candidate) &&
+      !/resume|cv|curriculum|vitae|profile|portfolio|page/i.test(candidate) &&
+      /^[a-zA-Z\s.'-]+$/.test(candidate) &&
+      candidate.split(/\s+/).length >= 1 &&
+      candidate.split(/\s+/).length <= 5
     ) {
-      fullName = line;
+      fullName = candidate;
       break;
     }
-  }
-  // If still empty, grab first line
-  if (!fullName && headerLines[0]) {
-    fullName = headerLines[0];
   }
 
   // Job Title: Line right below full name, or check header lines for job keyword indicators
