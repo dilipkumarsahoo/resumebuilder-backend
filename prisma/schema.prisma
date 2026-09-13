@@ -17,10 +17,32 @@ model User {
   role      String    @default("USER") // USER, ADMIN
   isPro     Boolean   @default(false)
   payments  Payment[]
+  jobs      Job[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
   @@map("users")
+}
+
+model Job {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position    String
+  company     String
+  status      String    @default("Bookmarked") // Bookmarked, Applied, Interviewing, Offer, Rejected
+  dateSaved   String?
+  dateApplied String?
+  type        String?   @default("Full-time") // Full-time, Part-time, Contract, Remote, Internship
+  resume      String?   @default("Monica's Resume")
+  notes       String?   @db.Text
+  location    String?
+  salary      String?
+  url         String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("jobs")
 }
 
 model Payment {

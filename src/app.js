@@ -7,6 +7,7 @@ const resumeRoutes = require('./modules/resume/resume.routes');
 const paymentRoutes = require('./modules/payment/payment.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
 const contactRoutes = require('./modules/contact/contact.routes');
+const jobsRoutes = require('./modules/jobs/jobs.routes');
 const { seedAdminIfNotExist } = require('./modules/admin/admin.service');
 const { errorHandler } = require('./middlewares/error.middleware');
 
@@ -28,6 +29,7 @@ app.use('/api/resume', resumeRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/jobs', jobsRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
