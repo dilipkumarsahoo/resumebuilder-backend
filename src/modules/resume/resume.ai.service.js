@@ -34,9 +34,17 @@ function cleanAndParseJSON(rawResponse) {
  * Format and sanitize the structured resume data ensuring all required fields are present
  */
 function sanitizeParsedResume(data) {
+  const resolvedJobTitle =
+    data?.jobTitle ||
+    data?.personal?.jobTitle ||
+    (Array.isArray(data?.experience) && (data.experience[0]?.jobTitle || data.experience[0]?.role)) ||
+    '';
+
   return {
+    jobTitle: resolvedJobTitle,
     personal: {
       fullName: data?.personal?.fullName || data?.fullName || '',
+      jobTitle: resolvedJobTitle,
       email: data?.personal?.email || data?.email || '',
       phone: data?.personal?.phone || data?.phone || '',
       location: data?.personal?.location || data?.location || '',
@@ -186,8 +194,10 @@ CRITICAL RULES:
   // Heuristic parsing fallback
   const heuristicData = parseResumeText(rawText);
   return sanitizeParsedResume({
+    jobTitle: heuristicData.jobTitle || '',
     personal: {
       fullName: heuristicData.fullName || '',
+      jobTitle: heuristicData.jobTitle || '',
       email: heuristicData.email || '',
       phone: heuristicData.phone || '',
       location: heuristicData.location || '',

@@ -54,6 +54,25 @@ async function extractTextFromBuffer(buffer, mimetype, originalname) {
 /**
  * Parses raw text extracted from a resume into structured CVData JSON without AI.
  */
+const commonSkillsList = [
+  'JavaScript', 'TypeScript', 'Python', 'Java', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Go', 'Rust',
+  'HTML', 'CSS', 'Sass', 'Tailwind', 'Bootstrap',
+  'Angular', 'React', 'Vue', 'Next.js', 'Nuxt.js', 'Svelte', 'jQuery',
+  'Node.js', 'Express', 'Nest.js', 'Django', 'Flask', 'Spring Boot', 'Laravel',
+  'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'Redis', 'Oracle', 'SQLite', 'Prisma', 'Sequelize',
+  'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Jenkins', 'Git', 'GitHub', 'GitLab', 'CI/CD',
+  'UI/UX', 'Figma', 'Sketch', 'Adobe XD', 'Photoshop', 'Illustrator'
+];
+
+function isLikelySkill(text) {
+  if (!text) return false;
+  const t = text.trim().toLowerCase();
+  return commonSkillsList.some(s => s.toLowerCase() === t || t.includes(s.toLowerCase()));
+}
+
+/**
+ * Parses raw text extracted from a resume into structured CVData JSON without AI.
+ */
 function parseResumeText(text) {
   if (!text) {
     return {
@@ -86,7 +105,7 @@ function parseResumeText(text) {
   };
   const lines = rawLines.filter(l => !isPageArtifact(l));
 
-  // Define section heading patterns
+  // Define section heading patterns with strict anchoring to avoid middle-of-sentence false triggers
   const SECTIONS = {
     SUMMARY: 'summary',
     EXPERIENCE: 'experience',
@@ -97,11 +116,11 @@ function parseResumeText(text) {
   };
 
   const patterns = {
-    [SECTIONS.SUMMARY]: /^(?:professional\s+)?summary|profile|about\s*me|objective|career\s*objective$/i,
-    [SECTIONS.EXPERIENCE]: /^(?:work|professional|employment)?\s*experience(?:s)?|work\s*history|employment\s*history$/i,
-    [SECTIONS.EDUCATION]: /^education(?:s)?|academic\s*(?:background|qualification|credentials|history)$/i,
-    [SECTIONS.SKILLS]: /^skills|key\s*skills|core\s*(?:competencies|skills)|expertise|technologies|technical\s*skills$/i,
-    [SECTIONS.PROJECTS]: /^projects|personal\s*projects|academic\s*projects|key\s*projects$/i
+    [SECTIONS.SUMMARY]: /^(?:(?:professional\s+|executive\s+|career\s+)?(?:summary|profile|overview)|about\s*me|(?:career\s+)?objective)$/i,
+    [SECTIONS.EXPERIENCE]: /^(?:(?:work|professional|employment|career|relevant|job|industry)?\s*(?:experience|history|employment|background)s?|work\s*history|employment\s*history)$/i,
+    [SECTIONS.EDUCATION]: /^(?:education(?:s)?|academic\s*(?:background|qualification|qualifications|credentials|history)|degrees?|qualifications?)$/i,
+    [SECTIONS.SKILLS]: /^(?:(?:key|core|technical|relevant|professional)?\s*(?:skills|competencies|expertise|technologies|tools)|technical\s*skills|skills\s*(?:&|and)\s*(?:tools|technologies))$/i,
+    [SECTIONS.PROJECTS]: /^(?:(?:personal|academic|key|recent|featured|selected)?\s*projects)$/i
   };
 
   // Group lines by sections
@@ -117,12 +136,9 @@ function parseResumeText(text) {
   let currentSection = SECTIONS.NONE;
 
   for (const line of lines) {
-    // Strip trailing colons, dashes or dots to match heading keywords
-    const cleanedLine = line.replace(/[:\-\.\s]+$/, '').trim();
-    
-    // Check if the line is a section header (usually short, e.g. < 40 characters)
+    const cleanedLine = line.replace(/^[•\-\*\d\.\s#|]+/u, '').replace(/[:\-\.\s]+$/, '').trim();
     let headerMatched = false;
-    if (cleanedLine.length > 2 && cleanedLine.length < 40) {
+    if (cleanedLine.length > 2 && cleanedLine.length < 45) {
       for (const [section, regex] of Object.entries(patterns)) {
         if (regex.test(cleanedLine)) {
           currentSection = section;
@@ -131,7 +147,6 @@ function parseResumeText(text) {
         }
       }
     }
-
     if (!headerMatched) {
       sectionContent[currentSection].push(line);
     }
@@ -139,52 +154,32 @@ function parseResumeText(text) {
 
   // 1. EXTRACT PERSONAL DETAILS
   const headerLines = sectionContent[SECTIONS.NONE];
-  const fullText = lines.join('\n');
+  const fullHeader = headerLines.join('\n');
 
-  // Email regex (standard RFC 5322)
+  // Email regex
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const emails = fullText.match(emailRegex) || [];
+  const emails = fullHeader.match(emailRegex) || cleanText.match(emailRegex) || [];
   const email = emails[0] || '';
 
-  // Phone regex (captures international & domestic formats, with optional country code, spaces, dashes, parentheses)
+  // Phone regex
   const phoneRegex = /(?:\+?\d{1,4}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{2,5}[-.\s]?\d{3,5}[-.\s]?\d{3,5}/g;
-  const phones = fullText.match(phoneRegex) || [];
-  // Filter phone matches that look valid (at least 7 digits, not years like 2014-2018)
+  const phones = fullHeader.match(phoneRegex) || cleanText.match(phoneRegex) || [];
   const validPhones = phones.filter(p => {
     const digits = p.replace(/\D/g, '');
-    return digits.length >= 7 && digits.length <= 15 && !p.includes('-'); // avoid ranges
+    return digits.length >= 7 && digits.length <= 15 && !p.includes('20') && !p.includes('19');
   });
-  const phone = validPhones[0] || (phones[0] ? phones[0].trim() : '');
+  const phone = validPhones[0] || '';
 
-  // Location search: Look for City, State / City, Country pattern
-  let location = '';
-  const locationRegex = /[A-Z][a-zA-Z\s]{1,25},\s*[A-Z]{2,3}(?:\s+\d{5})?\b/;
-  const locationMatch = fullText.match(locationRegex);
-  if (locationMatch) {
-    location = locationMatch[0].trim();
-  } else {
-    // Fallback: look in header lines for keywords like "Location:" or "Address:"
-    const locKeywordLine = headerLines.find(l => /location:|address:|lives in/i.test(l));
-    if (locKeywordLine) {
-      location = locKeywordLine.replace(/location:|address:|lives in/i, '').replace(/^[,\s:\-|•]+|[,\s:\-|•]+$/g, '').trim();
-    } else {
-      // Fallback 2: Check lines in header for something containing a comma (usually City, ST or City, Country)
-      const commaLine = headerLines.find(l => l.includes(',') && !l.includes('@') && !/\d{4,}/.test(l));
-      if (commaLine) {
-        location = commaLine.trim();
-      }
-    }
-  }
-
-  // Full Name: Look for a clean personal name in the header lines
+  // Full Name: Look in first 6 lines
   let fullName = '';
-  for (let i = 0; i < Math.min(headerLines.length, 8); i++) {
+  let fullNameIndex = -1;
+  for (let i = 0; i < Math.min(headerLines.length, 6); i++) {
     const candidate = headerLines[i].replace(/^[-–—•*\s]+|[-–—•*\s]+$/g, '').trim();
     if (
       candidate.length >= 2 &&
       candidate.length < 40 &&
       !candidate.includes('@') &&
-      !/\d/.test(candidate) && // Real person names do not contain digits
+      !/\d/.test(candidate) &&
       !/github\.com|linkedin\.com|http|www\./i.test(candidate) &&
       !/resume|cv|curriculum|vitae|profile|portfolio|page/i.test(candidate) &&
       /^[a-zA-Z\s.'-]+$/.test(candidate) &&
@@ -192,35 +187,94 @@ function parseResumeText(text) {
       candidate.split(/\s+/).length <= 5
     ) {
       fullName = candidate;
+      fullNameIndex = i;
       break;
     }
   }
 
-  // Job Title: Line right below full name, or check header lines for job keyword indicators
+  // Job Title: Line right below full name or matching known title keywords in header
   let jobTitle = '';
-  if (fullName) {
-    const nameIdx = headerLines.indexOf(fullName);
-    if (nameIdx !== -1 && nameIdx + 1 < headerLines.length) {
-      const nextLine = headerLines[nameIdx + 1];
+  const titleKeywords = [
+    'developer', 'engineer', 'manager', 'designer', 'analyst', 'consultant',
+    'architect', 'lead', 'specialist', 'officer', 'writer', 'administrator',
+    'intern', 'executive', 'coordinator', 'scientist', 'programmer',
+    'full stack', 'frontend', 'backend', 'devops', 'qa', 'tester'
+  ];
+
+  if (fullNameIndex !== -1 && fullNameIndex + 1 < headerLines.length) {
+    const nextLine = headerLines[fullNameIndex + 1].trim();
+    if (
+      nextLine.length > 2 &&
+      nextLine.length < 60 &&
+      !nextLine.includes('@') &&
+      !/github\.com|linkedin\.com|http/i.test(nextLine) &&
+      !/\b(19|20)\d{2}\b/.test(nextLine) &&
+      !phoneRegex.test(nextLine) &&
+      !nextLine.includes('|')
+    ) {
+      jobTitle = nextLine;
+    }
+  }
+
+  if (!jobTitle) {
+    for (let i = 0; i < headerLines.length; i++) {
+      if (i === fullNameIndex) continue;
+      const line = headerLines[i].trim();
       if (
-        nextLine.length > 2 &&
-        nextLine.length < 50 &&
-        !nextLine.includes('@') &&
-        !/github\.com|linkedin\.com/i.test(nextLine) &&
-        !/\b\d{4}\b/.test(nextLine)
+        titleKeywords.some(kw => line.toLowerCase().includes(kw)) &&
+        !line.includes('@') &&
+        !/github\.com|linkedin\.com/i.test(line) &&
+        !line.includes('|')
       ) {
-        jobTitle = nextLine;
+        jobTitle = line;
+        break;
       }
     }
   }
-  
-  if (!jobTitle) {
-    const titleKeywords = ['developer', 'engineer', 'manager', 'designer', 'analyst', 'consultant', 'architect', 'lead', 'specialist', 'officer', 'writer', 'administrator', 'intern', 'executive', 'coordinator'];
+
+  // Location: Extract strictly from header lines; NEVER grab from body or skills
+  let location = '';
+  const locKeywordLine = headerLines.find(l => /location:|address:|based in:|city:/i.test(l));
+  if (locKeywordLine) {
+    location = locKeywordLine.replace(/location:|address:|based in:|city:/i, '').replace(/^[,\s:\-|•]+|[,\s:\-|•]+$/g, '').trim();
+  }
+
+  if (!location) {
+    // Check lines with delimiters (e.g. email • phone • San Francisco, CA)
     for (const line of headerLines) {
-      if (line === fullName) continue;
-      if (titleKeywords.some(kw => line.toLowerCase().includes(kw)) && !line.includes('@') && !/github\.com|linkedin\.com/i.test(line)) {
-        jobTitle = line;
-        break;
+      if (line.includes('|') || line.includes('•') || line.includes(' - ')) {
+        const parts = line.split(/[|•]|(?:\s+-\s+)/).map(p => p.trim()).filter(Boolean);
+        for (const part of parts) {
+          if (
+            !part.includes('@') &&
+            !phoneRegex.test(part) &&
+            !/github\.com|linkedin\.com|http/i.test(part) &&
+            !isLikelySkill(part) &&
+            part.length >= 3 &&
+            part.length <= 40 &&
+            !titleKeywords.some(kw => part.toLowerCase() === kw)
+          ) {
+            if (part.includes(',') || /^[A-Z][a-zA-Z\s]+$/.test(part)) {
+              location = part;
+              break;
+            }
+          }
+        }
+        if (location) break;
+      }
+    }
+  }
+
+  if (!location) {
+    // Check header lines for standard City, State / Country format
+    const locationRegex = /\b[A-Z][a-zA-Z\s]{1,25},\s*[A-Za-z\s]{2,20}\b/;
+    for (const line of headerLines) {
+      if (!line.includes('@') && !/github\.com|linkedin\.com/i.test(line)) {
+        const match = line.match(locationRegex);
+        if (match && !isLikelySkill(match[0])) {
+          location = match[0].trim();
+          break;
+        }
       }
     }
   }
@@ -229,25 +283,6 @@ function parseResumeText(text) {
   let summary = '';
   if (sectionContent[SECTIONS.SUMMARY].length > 0) {
     summary = sectionContent[SECTIONS.SUMMARY].join('\n');
-  } else {
-    // If no summary section, look for lines between jobTitle and the first section header
-    const summaryLines = [];
-    let record = false;
-    for (const line of headerLines) {
-      if (line === jobTitle) {
-        record = true;
-        continue;
-      }
-      if (record) {
-        if (line.includes('@') || line.match(phoneRegex) || line === location) {
-          continue; // skip contact lines
-        }
-        summaryLines.push(line);
-      }
-    }
-    if (summaryLines.length > 0) {
-      summary = summaryLines.join(' ');
-    }
   }
 
   // 3. SKILLS
@@ -255,14 +290,13 @@ function parseResumeText(text) {
   const skillsText = sectionContent[SECTIONS.SKILLS].join('\n');
   const separators = /[,;|\t•\n\-\*]/;
   const rawSkills = skillsText.split(separators);
-  
   for (let skill of rawSkills) {
     skill = skill.trim();
     if (
       skill &&
       skill.length > 1 &&
-      skill.length < 30 &&
-      !/skills|languages|tools|expertise|core/i.test(skill)
+      skill.length < 35 &&
+      !/^(?:skills|languages|tools|expertise|core|technologies)$/i.test(skill)
     ) {
       if (!skills.includes(skill)) {
         skills.push(skill);
@@ -270,22 +304,9 @@ function parseResumeText(text) {
     }
   }
 
-  // List of highly common tech/business skills to cross-reference (fallback if section text parsing misses some)
-  const commonSkills = [
-    'JavaScript', 'TypeScript', 'Python', 'Java', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Go', 'Rust',
-    'HTML', 'CSS', 'Sass', 'Tailwind', 'Bootstrap',
-    'Angular', 'React', 'Vue', 'Next.js', 'Nuxt.js', 'Svelte', 'jQuery',
-    'Node.js', 'Express', 'Nest.js', 'Django', 'Flask', 'Spring Boot', 'Laravel',
-    'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'Redis', 'Oracle', 'SQLite', 'Prisma', 'Sequelize',
-    'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Jenkins', 'Git', 'GitHub', 'GitLab', 'CI/CD',
-    'UI/UX', 'Figma', 'Sketch', 'Adobe XD', 'Photoshop', 'Illustrator',
-    'Agile', 'Scrum', 'Project Management', 'Machine Learning', 'Data Science', 'Artificial Intelligence',
-    'Communication', 'Leadership', 'Problem Solving', 'Teamwork', 'Time Management'
-  ];
-
   if (skills.length < 3) {
-    const textLower = fullText.toLowerCase();
-    for (const skill of commonSkills) {
+    const textLower = cleanText.toLowerCase();
+    for (const skill of commonSkillsList) {
       const regex = new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
       if (regex.test(textLower) && !skills.map(s => s.toLowerCase()).includes(skill.toLowerCase())) {
         skills.push(skill);
@@ -296,75 +317,79 @@ function parseResumeText(text) {
   // 4. EXPERIENCE
   const experience = [];
   const expLines = sectionContent[SECTIONS.EXPERIENCE];
-  
-  // Regex to match date range patterns (e.g. Jan 2021 - Present, 2018 - 2020)
-  const dateRangeRegex = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December|\d{1,2})?\s*\d{4}\s*[-–—to\s]+\s*(?:Present|Current|Now|\d{1,2}?\s*\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{4})/i;
 
-  const jobHeaderIndices = [];
+  // Comprehensive Date Range Pattern:
+  // Jan 2021 - Present, 01/2021 - Present, 2018 - 2020, 2020 – Current, 05/2020 to 08/2022
+  const dateRangePattern = /(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*|\d{1,2})[\s\/\.\-']*)?\b(19\d\d|20\d\d)\b\s*(?:[-–—~]|(?:\s+to\s+)|\s*-\s*)\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*|\d{1,2})[\s\/\.\-']*)?\b(19\d\d|20\d\d|Present|Current|Now|Ongoing)\b/i;
+
+  const entryIndices = [];
   for (let i = 0; i < expLines.length; i++) {
-    if (dateRangeRegex.test(expLines[i])) {
-      jobHeaderIndices.push(i);
+    if (dateRangePattern.test(expLines[i])) {
+      entryIndices.push(i);
     }
   }
 
-  for (let k = 0; k < jobHeaderIndices.length; k++) {
-    const idx = jobHeaderIndices[k];
-    const nextIdx = jobHeaderIndices[k + 1] || expLines.length;
-    
-    const line = expLines[idx];
-    const dateMatch = line.match(dateRangeRegex);
-    const dateRange = dateMatch[0];
-    
-    let headerText = line.replace(dateRange, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
-    
-    // Check if the previous line should be part of the header (company on one line, role + date on next)
-    let prevLine = '';
-    if (idx > 0 && (k === 0 || idx - 1 > jobHeaderIndices[k - 1])) {
-      prevLine = expLines[idx - 1];
-    }
-    
-    let company = '';
+  for (let k = 0; k < entryIndices.length; k++) {
+    const dateLineIdx = entryIndices[k];
+    const nextDateLineIdx = entryIndices[k + 1] || expLines.length;
+
+    const dateLine = expLines[dateLineIdx];
+    const dateMatch = dateLine.match(dateRangePattern);
+    const dateRangeStr = dateMatch ? dateMatch[0] : '';
+
+    // Split without destroying characters in 'Present', 'Oct', etc.
+    const dateParts = dateRangeStr.split(/\s*(?:[-–—~]|(?:\s+to\s+))\s*/i);
+    const startDate = (dateParts[0] || '').trim();
+    const endDate = (dateParts[1] || '').trim();
+
+    const lineWithoutDate = dateLine.replace(dateRangePattern, '').replace(/[()]/g, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
+
     let role = '';
-    
-    if (prevLine && prevLine.length < 50 && !prevLine.startsWith('•') && !prevLine.startsWith('-')) {
-      role = prevLine;
-      company = headerText;
-      
-      const roleKeywords = ['developer', 'engineer', 'manager', 'designer', 'analyst', 'lead', 'consultant', 'specialist', 'architect', 'officer'];
-      if (roleKeywords.some(kw => company.toLowerCase().includes(kw)) && !roleKeywords.some(kw => role.toLowerCase().includes(kw))) {
-        const temp = role;
-        role = company;
-        company = temp;
-      }
-    } else {
-      const sepMatch = headerText.match(/\s+at\s+|\s*[|\-,–—•]\s*/i);
+    let company = '';
+
+    if (lineWithoutDate.length > 2) {
+      // Role & company are on same line as date
+      const sepMatch = lineWithoutDate.match(/\s+at\s+|\s*[|\-,–—•]\s*/i);
       if (sepMatch) {
-        const parts = headerText.split(sepMatch[0]);
+        const parts = lineWithoutDate.split(sepMatch[0]);
         role = parts[0].trim();
         company = parts[1].trim();
       } else {
-        role = headerText;
+        role = lineWithoutDate;
+      }
+    } else if (dateLineIdx > 0 && (k === 0 || dateLineIdx - 1 > entryIndices[k - 1])) {
+      // Date is on line after role / company
+      const prevLine = expLines[dateLineIdx - 1].replace(/^[•\-\*\s]+/, '').trim();
+      const sepMatch = prevLine.match(/\s+at\s+|\s*[|\-,–—•]\s*/i);
+      if (sepMatch) {
+        const parts = prevLine.split(sepMatch[0]);
+        role = parts[0].trim();
+        company = parts[1].trim();
+      } else {
+        role = prevLine;
       }
     }
-    
-    const dates = dateRange.split(/[-–—to]+/i).map(d => d.trim());
-    const startDate = dates[0] || '';
-    const endDate = dates[1] || '';
-    
-    // Extract description lines
+
+    // Role vs Company refinement using keywords
+    if (company && titleKeywords.some(kw => company.toLowerCase().includes(kw)) && !titleKeywords.some(kw => role.toLowerCase().includes(kw))) {
+      const tmp = role;
+      role = company;
+      company = tmp;
+    }
+
+    // Collect description lines
     const descLines = [];
-    for (let j = idx + 1; j < nextIdx; j++) {
-      // If next job header uses j as its prevLine, we stop before it
-      if (k + 1 < jobHeaderIndices.length && j === jobHeaderIndices[k + 1] - 1) {
-        const nextHeaderLine = expLines[jobHeaderIndices[k + 1]];
-        // check if nextHeaderLine has a valid prevLine
-        if (j > idx && expLines[j].length < 50 && !expLines[j].startsWith('•') && !expLines[j].startsWith('-')) {
-          break;
+    for (let j = dateLineIdx + 1; j < nextDateLineIdx; j++) {
+      if (k + 1 < entryIndices.length && j === entryIndices[k + 1] - 1) {
+        const nextDateLine = expLines[entryIndices[k + 1]];
+        const nextWithoutDate = nextDateLine.replace(dateRangePattern, '').trim();
+        if (nextWithoutDate.length <= 2) {
+          break; // belongs to next job's header
         }
       }
       descLines.push(expLines[j]);
     }
-    
+
     experience.push({
       id: (k + 1).toString(),
       company: company || 'Company Name',
@@ -375,76 +400,59 @@ function parseResumeText(text) {
     });
   }
 
+  // If jobTitle still not found, fall back to first job role
+  if (!jobTitle && experience.length > 0) {
+    jobTitle = experience[0].role;
+  }
+
   // 5. EDUCATION
   const education = [];
   const eduLines = sectionContent[SECTIONS.EDUCATION];
-  
-  const eduKeywords = ['university', 'college', 'school', 'institute', 'academy', 'polytechnic'];
-  const degreeKeywords = ['bachelor', 'master', 'phd', 'doctor', 'b.s.', 'b.a.', 'b.tech', 'm.s.', 'm.a.', 'm.tech', 'diploma', 'associate', 'degree', 'bsc', 'msc', 'bba', 'mba'];
-  
-  const eduHeaderIndices = [];
-  for (let i = 0; i < eduLines.length; i++) {
-    const line = eduLines[i].toLowerCase();
-    const hasInst = eduKeywords.some(kw => line.includes(kw));
-    const hasDeg = degreeKeywords.some(kw => line.includes(kw)) || /b\.[a-z]+|m\.[a-z]+/i.test(line);
-    if (hasInst || hasDeg) {
-      eduHeaderIndices.push(i);
+  const eduKeywords = ['university', 'college', 'school', 'institute', 'academy', 'polytechnic', 'campus'];
+  const degreeKeywords = ['bachelor', 'master', 'phd', 'doctor', 'b.s.', 'b.a.', 'b.tech', 'm.s.', 'm.a.', 'm.tech', 'diploma', 'associate', 'degree', 'bsc', 'msc', 'bba', 'mba', 'b.e.', 'm.e.'];
+  const eduYearRegex = /\b(?:19|20)\d{2}(?:\s*[-–—~to]+\s*(?:(?:19|20)\d{2}|Present|Current))?\b/i;
+
+  let currentEdu = null;
+  for (const rawLine of eduLines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const lowerLine = line.toLowerCase();
+    const isInst = eduKeywords.some(kw => lowerLine.includes(kw));
+    const isDeg = degreeKeywords.some(kw => lowerLine.includes(kw)) || /\bb\.[a-z]+|\bm\.[a-z]+/i.test(line);
+    const yearMatch = line.match(eduYearRegex);
+
+    if (!currentEdu || (isDeg && currentEdu.degree && currentEdu.institution) || (isInst && currentEdu.institution && currentEdu.degree)) {
+      if (currentEdu && (currentEdu.institution || currentEdu.degree)) {
+        education.push(currentEdu);
+      }
+      currentEdu = {
+        id: (education.length + 1).toString(),
+        institution: '',
+        degree: '',
+        year: ''
+      };
+    }
+
+    if (yearMatch && !currentEdu.year) {
+      currentEdu.year = yearMatch[0].trim();
+    }
+
+    const cleanWithoutYear = line.replace(eduYearRegex, '').replace(/[()]/g, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
+
+    if (isInst && !currentEdu.institution) {
+      currentEdu.institution = cleanWithoutYear;
+    } else if (isDeg && !currentEdu.degree) {
+      currentEdu.degree = cleanWithoutYear;
+    } else if (!currentEdu.institution) {
+      currentEdu.institution = cleanWithoutYear;
+    } else if (!currentEdu.degree) {
+      currentEdu.degree = cleanWithoutYear;
     }
   }
 
-  // If no education keywords, look for lines with 4-digit years as headers
-  if (eduHeaderIndices.length === 0) {
-    for (let i = 0; i < eduLines.length; i++) {
-      if (/\b\d{4}\b/.test(eduLines[i])) {
-        eduHeaderIndices.push(i);
-      }
-    }
-  }
-
-  for (let k = 0; k < eduHeaderIndices.length; k++) {
-    const idx = eduHeaderIndices[k];
-    const nextIdx = eduHeaderIndices[k + 1] || eduLines.length;
-    
-    const linesBlock = eduLines.slice(idx, nextIdx);
-    
-    let institution = '';
-    let degree = '';
-    let year = '';
-    
-    const yearRegex = /\b\d{4}\s*(?:[-–—to\s]+\s*\d{4})?\b/i;
-    
-    for (const line of linesBlock) {
-      const yearMatch = line.match(yearRegex);
-      if (yearMatch && !year) {
-        year = yearMatch[0];
-      }
-      
-      const lowerLine = line.toLowerCase();
-      const isInst = eduKeywords.some(kw => lowerLine.includes(kw));
-      const isDeg = degreeKeywords.some(kw => lowerLine.includes(kw)) || /b\.[a-z]+|m\.[a-z]+/i.test(line);
-      
-      if (isInst) {
-        institution = line.replace(yearRegex, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
-      } else if (isDeg && !degree) {
-        degree = line.replace(yearRegex, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
-      }
-    }
-    
-    if (!institution && linesBlock[0]) {
-      institution = linesBlock[0].replace(yearRegex, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
-    }
-    if (!degree && linesBlock[1]) {
-      degree = linesBlock[1].replace(yearRegex, '').replace(/^[,\s:\-|•\*]+|[,\s:\-|•\*]+$/g, '').trim();
-    } else if (!degree) {
-      degree = 'Degree';
-    }
-    
-    education.push({
-      id: (k + 1).toString(),
-      institution: institution || 'Institution',
-      degree: degree,
-      year: year || ''
-    });
+  if (currentEdu && (currentEdu.institution || currentEdu.degree)) {
+    education.push(currentEdu);
   }
 
   // 6. PROJECTS
@@ -457,7 +465,7 @@ function parseResumeText(text) {
     const line = projLines[i];
     const isBullet = line.startsWith('•') || line.startsWith('-') || line.startsWith('*');
     const cleanLine = line.replace(/^[•\-\*\s]+/, '').trim();
-    
+
     if (!isBullet && cleanLine.length > 2 && cleanLine.length < 50 && !cleanLine.includes('.') && i + 1 < projLines.length) {
       if (currentProject) {
         projects.push(currentProject);
